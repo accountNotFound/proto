@@ -8,7 +8,6 @@
 
 namespace proto {
 
-template <typename CodecImpl>
 struct BaseCodec {
   struct Error {
     std::string err_msg;
@@ -19,27 +18,15 @@ struct BaseCodec {
   auto buffer() const -> const std::stringstream& { return _ss; }
 
   template <typename T>
-  void encode(const T& data) {
-    static_cast<CodecImpl*>(this)->encode(data);
-  }
-
-  template <typename T>
-  auto decode() -> std::expected<T, Error> {
-    return static_cast<CodecImpl*>(this)->decode();
-  }
-
- protected:
-  std::stringstream _ss;
-};
-
-struct NoopCodec : public BaseCodec<NoopCodec> {
-  template <typename T>
   void encode(const T& data) {}
 
   template <typename T>
   auto decode() -> std::expected<T, Error> {
     return {};
   }
+
+ protected:
+  std::stringstream _ss;
 };
 
 template <typename Codec>
@@ -55,7 +42,7 @@ template <typename Model>
 class BaseModel;
 
 template <template <typename> typename Model, typename Codec>
-  requires std::is_base_of_v<BaseCodec<Codec>, Codec>
+  requires std::is_base_of_v<BaseCodec, Codec>
 class BaseModel<Model<Codec>> {
  public:
   template <typename T>

@@ -6,7 +6,7 @@
 #include "codec.h"
 #include "mtest.h"
 
-template <typename Codec = proto::NoopCodec>
+template <typename Codec = proto::BaseCodec>
 struct User : public proto::BaseModel<User<Codec>> {
   using Model = User;
 
