@@ -4,7 +4,8 @@
 
 namespace proto::_impl {
 
-struct ValueLiteralCodec : public BaseCodec {
+template <typename DerivedCodec>
+struct LiteralCodec : public BaseCodec {
   template <typename T>
     requires std::is_arithmetic_v<T>
   void encode(T& value) {
@@ -12,6 +13,19 @@ struct ValueLiteralCodec : public BaseCodec {
   }
 
   void encode(std::string& value) { _ss << '"' << value << '"'; }
+
+  template <typename V>
+  void encode(std::vector<V>& arr) {
+    _ss << '[';
+    for (size_t i = 0; auto& value : arr) {
+      if (i > 0) {
+        _ss << ',';
+      }
+      static_cast<DerivedCodec*>(this)->encode(value);
+      ++i;
+    }
+    _ss << ']';
+  }
 
   template <typename T>
   auto decode() -> std::expected<T, Error> {
@@ -24,10 +38,10 @@ struct ValueLiteralCodec : public BaseCodec {
 
 namespace proto {
 
-class ReprCodec : public _impl::ValueLiteralCodec {
+class ReprCodec : public _impl::LiteralCodec<ReprCodec> {
  public:
-  using ValueLiteralCodec::decode;
-  using ValueLiteralCodec::encode;
+  using LiteralCodec::decode;
+  using LiteralCodec::encode;
 
   template <template <typename> typename Model, typename Codec>
     requires std::is_base_of_v<BaseModel<Model<Codec>>, Model<Codec>>
@@ -45,10 +59,10 @@ class ReprCodec : public _impl::ValueLiteralCodec {
   }
 };
 
-class JsonCodec : public _impl::ValueLiteralCodec {
+class JsonCodec : public _impl::LiteralCodec<JsonCodec> {
  public:
-  using ValueLiteralCodec::decode;
-  using ValueLiteralCodec::encode;
+  using LiteralCodec::decode;
+  using LiteralCodec::encode;
 
   template <template <typename> typename Model, typename Codec>
     requires std::is_base_of_v<BaseModel<Model<Codec>>, Model<Codec>>
