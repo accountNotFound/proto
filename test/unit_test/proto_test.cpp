@@ -43,7 +43,7 @@ TEST(proto, plaintext_codec) {
 
     repr.encode(msg);
     std::cout << repr.buffer().str() << '\n';
-    
+
     json.encode(msg);
     std::cout << json.buffer().str() << '\n';
   }
@@ -58,5 +58,69 @@ TEST(proto, plaintext_codec) {
     json.buffer().clear();
     json.buffer() << repr.buffer().str();
     ASSERT(!json.decode(msg2), "");
+  }
+}
+
+TEST(proto, plaintext_decode) {
+  auto repr_str = R"(
+(0, "", [
+  (123, "Alice", (
+    1.6, 50.5, "Beijing"
+  )), 
+  (456, "Bob", (
+    1.8, 72.3, "Shenzhen"
+  ))
+])
+)";
+
+  auto json_str = R"(
+{
+  "code": 0,
+  "msg": "",
+  "data": [
+    {
+      "id": 123,
+      "name": "Alice",
+      "detail": {
+        "height": 1.6,
+        "weight": 50.5,
+        "address": "Beijing"
+      }
+    },
+    {
+      "id": 456,
+      "name": "Bob",
+      "detail": {
+        "height": 1.8,
+        "weight": 72.3,
+        "address": "Shenzhen"
+      }
+    }
+  ]
+}
+)";
+
+  {
+    proto::ReprCodec repr;
+    repr.buffer() << repr_str;
+    Message<> msg;
+    ASSERT(repr.decode(msg), "");
+    ASSERT(msg.data.size() == 2, "");
+
+    repr.buffer().clear();
+    repr.buffer() << json_str;
+    ASSERT(!repr.decode(msg), "");
+  }
+
+  {
+    proto::JsonCodec json;
+    json.buffer() << json_str;
+    Message<> msg;
+    ASSERT(json.decode(msg), "");
+    ASSERT(msg.data.size() == 2, "");
+
+    json.buffer().clear();
+    json.buffer() << repr_str;
+    ASSERT(!json.decode(msg), "");
   }
 }
