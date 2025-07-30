@@ -2,9 +2,38 @@
 
 #include <format>
 
-#include "proto.h"
+namespace proto {
 
-namespace proto::_impl {
+template <typename Derived>
+class BaseModel;
+
+/**
+ * @brief A no-operation codec
+ */
+struct BaseCodec {
+  struct Error {
+    std::string err_msg;
+  };
+
+  auto buffer() -> std::stringstream& { return _ss; }
+
+  auto buffer() const -> const std::stringstream& { return _ss; }
+
+  template <typename T>
+  auto encode(const T& data) -> std::expected<void, Error> {
+    return {};
+  }
+
+  template <typename T>
+  auto decode(T& data) -> std::expected<void, Error> {
+    return {};
+  }
+
+ protected:
+  std::stringstream _ss;
+};
+
+namespace _impl {
 
 template <typename DerivedCodec>
 struct PlaintextCodec : public BaseCodec {
@@ -245,11 +274,11 @@ struct BinaryCodec : public BaseCodec {
   bool _is_little_endian;
 };
 
-}  // namespace proto::_impl
-
-namespace proto {
+}  // namespace _impl
 
 /**
+ * @brief A repr text codec. Suitable for shallow nesting object
+ *
  * @note Decode destination object may come into invalid status if decode failed
  */
 class ReprCodec : public _impl::PlaintextCodec<ReprCodec> {
@@ -257,9 +286,9 @@ class ReprCodec : public _impl::PlaintextCodec<ReprCodec> {
   using PlaintextCodec::decode;
   using PlaintextCodec::encode;
 
-  template <template <typename> typename Model>
-    requires std::is_base_of_v<BaseModel<Model<BaseCodec>>, Model<BaseCodec>>
-  auto encode(const Model<BaseCodec>& model) -> std::expected<void, Error> {
+  template <template <typename> typename Model, typename Codec>
+    requires std::is_base_of_v<BaseModel<Model<Codec>>, Model<Codec>>
+  auto encode(const Model<Codec>& model) -> std::expected<void, Error> {
     static Model<ReprCodec> _;
     _ss << '(';
     for (size_t i = 0; auto& field : Model<ReprCodec>::fields()) {
@@ -275,22 +304,22 @@ class ReprCodec : public _impl::PlaintextCodec<ReprCodec> {
     return {};
   }
 
-  template <template <typename> typename Model>
-    requires std::is_base_of_v<BaseModel<Model<BaseCodec>>, Model<BaseCodec>>
-  auto decode(Model<BaseCodec>& model) -> std::expected<void, Error> {
+  template <template <typename> typename Model, typename Codec>
+    requires std::is_base_of_v<BaseModel<Model<Codec>>, Model<Codec>>
+  auto decode(Model<Codec>& model) -> std::expected<void, Error> {
     static Model<ReprCodec> _;
     _remove_blanks();
     if (_ss.get() != '(') {
-      return std::unexpected(Error(std::format("expect '(' to start {}", typeid(Model<BaseCodec>).name())));
+      return std::unexpected(Error(std::format("expect '(' to start {}", typeid(Model<Codec>).name())));
     }
     for (size_t i = 0; auto& field : Model<ReprCodec>::fields()) {
       _remove_blanks();
       char c = _ss.peek();
       if (c == _ss.eof()) {
-        return std::unexpected(Error(std::format("expect ')' to end {}", typeid(Model<BaseCodec>).name())));
+        return std::unexpected(Error(std::format("expect ')' to end {}", typeid(Model<Codec>).name())));
       }
       if (i > 0 && _ss.get() != ',') {
-        return std::unexpected(Error(std::format("expect ',' to separate {}", typeid(Model<BaseCodec>).name())));
+        return std::unexpected(Error(std::format("expect ',' to separate {}", typeid(Model<Codec>).name())));
       }
       if (auto r = field->load(&model, *this); !r) {
         return r;
@@ -299,7 +328,7 @@ class ReprCodec : public _impl::PlaintextCodec<ReprCodec> {
     }
     _remove_blanks();
     if (_ss.get() != ')') {
-      return std::unexpected(Error(std::format("expect ')' to end {}", typeid(Model<BaseCodec>).name())));
+      return std::unexpected(Error(std::format("expect ')' to end {}", typeid(Model<Codec>).name())));
     }
     return {};
   }
@@ -313,9 +342,9 @@ class JsonCodec : public _impl::PlaintextCodec<JsonCodec> {
   using PlaintextCodec::decode;
   using PlaintextCodec::encode;
 
-  template <template <typename> typename Model>
-    requires std::is_base_of_v<BaseModel<Model<BaseCodec>>, Model<BaseCodec>>
-  auto encode(const Model<BaseCodec>& model) -> std::expected<void, Error> {
+  template <template <typename> typename Model, typename Codec>
+    requires std::is_base_of_v<BaseModel<Model<Codec>>, Model<Codec>>
+  auto encode(const Model<Codec>& model) -> std::expected<void, Error> {
     static Model<JsonCodec> _;
     _ss << '{';
     for (size_t i = 0; auto& field : Model<JsonCodec>::fields()) {
@@ -332,28 +361,28 @@ class JsonCodec : public _impl::PlaintextCodec<JsonCodec> {
     return {};
   }
 
-  template <template <typename> typename Model>
-    requires std::is_base_of_v<BaseModel<Model<BaseCodec>>, Model<BaseCodec>>
-  auto decode(Model<BaseCodec>& model) -> std::expected<void, Error> {
+  template <template <typename> typename Model, typename Codec>
+    requires std::is_base_of_v<BaseModel<Model<Codec>>, Model<Codec>>
+  auto decode(Model<Codec>& model) -> std::expected<void, Error> {
     static Model<JsonCodec> _;
     _remove_blanks();
     if (_ss.get() != '{') {
-      return std::unexpected(Error(std::format("expect '{{' to start {}", typeid(Model<BaseCodec>).name())));
+      return std::unexpected(Error(std::format("expect '{{' to start {}", typeid(Model<Codec>).name())));
     }
     for (size_t i = 0; auto& field : Model<JsonCodec>::fields()) {
       _remove_blanks();
       char c = _ss.peek();
       if (c == _ss.eof()) {
-        return std::unexpected(Error(std::format("expect '}}' to end {}", typeid(Model<BaseCodec>).name())));
+        return std::unexpected(Error(std::format("expect '}}' to end {}", typeid(Model<Codec>).name())));
       }
       if (i > 0 && _ss.get() != ',') {
-        return std::unexpected(Error(std::format("expect ',' to separate {}", typeid(Model<BaseCodec>).name())));
+        return std::unexpected(Error(std::format("expect ',' to separate {}", typeid(Model<Codec>).name())));
       }
       std::string name;
       decode(name);
       _remove_blanks();
       if (_ss.get() != ':') {
-        return std::unexpected(Error(std::format("expect ':' to separate {}", typeid(Model<BaseCodec>).name())));
+        return std::unexpected(Error(std::format("expect ':' to separate {}", typeid(Model<Codec>).name())));
       }
       if (auto r = field->load(&model, *this); !r) {
         return r;
@@ -362,28 +391,28 @@ class JsonCodec : public _impl::PlaintextCodec<JsonCodec> {
     }
     _remove_blanks();
     if (_ss.get() != '}') {
-      return std::unexpected(Error(std::format("expect '}}' to end {}", typeid(Model<BaseCodec>).name())));
+      return std::unexpected(Error(std::format("expect '}}' to end {}", typeid(Model<Codec>).name())));
     }
     return {};
   }
 };
 
 /**
- * @brief A binary codec
+ * @brief A binary codec. Suitable for large numeric object
  *
  * @note Decode destination object may come into invalid status if decode failed
  */
-class FastCodec : public _impl::BinaryCodec<FastCodec> {
+class BitsCodec : public _impl::BinaryCodec<BitsCodec> {
  public:
   using BinaryCodec::decode;
   using BinaryCodec::encode;
 
-  template <template <typename> typename Model>
-    requires std::is_base_of_v<BaseModel<Model<BaseCodec>>, Model<BaseCodec>>
-  auto encode(const Model<BaseCodec>& model) -> std::expected<void, Error> {
-    static Model<FastCodec> _;
+  template <template <typename> typename Model, typename Codec>
+    requires std::is_base_of_v<BaseModel<Model<Codec>>, Model<Codec>>
+  auto encode(const Model<Codec>& model) -> std::expected<void, Error> {
+    static Model<BitsCodec> _;
     _ss.write(&TypeTag::Model, 1);
-    for (size_t i = 0; auto& field : Model<FastCodec>::fields()) {
+    for (size_t i = 0; auto& field : Model<BitsCodec>::fields()) {
       if (auto r = field->dump(&model, *this); !r) {
         return r;
       }
@@ -392,16 +421,16 @@ class FastCodec : public _impl::BinaryCodec<FastCodec> {
     return {};
   }
 
-  template <template <typename> typename Model>
-    requires std::is_base_of_v<BaseModel<Model<BaseCodec>>, Model<BaseCodec>>
-  auto decode(Model<BaseCodec>& model) -> std::expected<void, Error> {
-    static Model<FastCodec> _;
+  template <template <typename> typename Model, typename Codec>
+    requires std::is_base_of_v<BaseModel<Model<Codec>>, Model<Codec>>
+  auto decode(Model<Codec>& model) -> std::expected<void, Error> {
+    static Model<BitsCodec> _;
     char tag = 0;
     _ss.read(&tag, 1);
     if (_ss.gcount() == 0 || tag != TypeTag::Model) {
-      return std::unexpected(Error(std::format("invalid tag while parse {}", typeid(Model<BaseCodec>).name())));
+      return std::unexpected(Error(std::format("invalid tag while parse {}", typeid(Model<Codec>).name())));
     }
-    for (auto& field : Model<FastCodec>::fields()) {
+    for (auto& field : Model<BitsCodec>::fields()) {
       if (auto r = field->load(&model, *this); !r) {
         return r;
       }

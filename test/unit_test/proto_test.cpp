@@ -6,8 +6,8 @@
 #include "codec.h"
 #include "mtest.h"
 
-template <typename T = proto::BaseCodec>
-struct UserDetail : public proto::BaseModel<UserDetail<T>> {
+template <typename C = proto::ReprCodec>
+struct UserDetail : public proto::BaseModel<UserDetail<C>> {
   using Model = UserDetail;
 
   FIELD(float, height, -1);
@@ -15,8 +15,8 @@ struct UserDetail : public proto::BaseModel<UserDetail<T>> {
   FIELD(std::string, address, "unknown");
 };
 
-template <typename T = proto::BaseCodec>
-struct User : public proto::BaseModel<User<T>> {
+template <typename C = proto::ReprCodec>
+struct User : public proto::BaseModel<User<C>> {
   using Model = User;
 
   FIELD(uint32_t, id, 0);
@@ -24,7 +24,7 @@ struct User : public proto::BaseModel<User<T>> {
   FIELD(UserDetail<>, detail, {});
 };
 
-template <typename T = proto::BaseCodec>
+template <typename T = proto::ReprCodec>
 struct Message : public proto::BaseModel<Message<T>> {
   using Model = Message;
 
@@ -33,31 +33,30 @@ struct Message : public proto::BaseModel<Message<T>> {
   FIELD(std::vector<User<>>, data, {});
 };
 
-User<> u1 = {.id = 123, .name = "Alice", .detail = {.height = 1.6, .weight = 50.5, .address = "Beijing"}};
-User<> u2 = {.id = 456, .name = "Bob", .detail = {.height = 1.8, .weight = 72.3, .address = "Shenzhen"}};
-Message<> msg = {.data = {u1, u2}};
+User<> user1 = {.id = 123, .name = "Alice", .detail = {.height = 1.6, .weight = 50.5, .address = "Beijing"}};
+User<> user2 = {.id = 456, .name = "Bob", .detail = {.height = 1.8, .weight = 72.3, .address = "Shenzhen"}};
+Message<> message = {.data = {user1, user2}};
 
 TEST(proto, plaintext_codec) {
-  proto::ReprCodec repr;
-  proto::JsonCodec json;
+  std::string json_str;
+  std::string repr_str;
   {
-    repr.encode(msg);
-    std::cout << repr.buffer().str() << '\n';
+    repr_str = message.encode().value();
+    std::cout << repr_str << '\n';
 
-    json.encode(msg);
-    std::cout << json.buffer().str() << '\n';
+    json_str = message.encode_by<proto::JsonCodec>().value();
+    std::cout << json_str << '\n';
   }
   {
-    Message<> msg2;
-    ASSERT(repr.decode(msg2), "");
-    ASSERT(msg2.data.size() == 2, "");
+    auto msg = Message<>::decode(repr_str);
+    ASSERT(msg && msg->data.size() == 2, "");
 
-    ASSERT(json.decode(msg2), "");
-    ASSERT(msg2.data.size() == 2, "");
-
-    json.buffer().clear();
-    json.buffer() << repr.buffer().str();
-    ASSERT(!json.decode(msg2), "");
+    auto msg2 = Message<>::decode_by<proto::JsonCodec>(json_str);
+    ASSERT(msg2 && msg2->data.size() == 2, "");
+  }
+  {
+    ASSERT(!Message<>::decode(json_str), "");
+    ASSERT(!Message<>::decode_by<proto::JsonCodec>(repr_str), "");
   }
 }
 
@@ -101,45 +100,33 @@ TEST(proto, pretty_decode) {
 )";
 
   {
-    proto::ReprCodec repr;
-    repr.buffer() << repr_str;
-    Message<> msg;
-    ASSERT(repr.decode(msg), "");
-    ASSERT(msg.data.size() == 2, "");
+    auto msg1 = Message<>::decode(repr_str);
+    ASSERT(msg1 && msg1->data.size() == 2, "");
 
-    repr.buffer().clear();
-    repr.buffer() << json_str;
-    ASSERT(!repr.decode(msg), "");
-  }
+    auto msg2 = Message<>::decode_by<proto::JsonCodec>(json_str);
+    ASSERT(msg2 && msg2->data.size() == 2, "");
 
-  {
-    proto::JsonCodec json;
-    json.buffer() << json_str;
-    Message<> msg;
-    ASSERT(json.decode(msg), "");
-    ASSERT(msg.data.size() == 2, "");
-
-    json.buffer().clear();
-    json.buffer() << repr_str;
-    ASSERT(!json.decode(msg), "");
+    ASSERT(!Message<>::decode(json_str), "");
+    ASSERT(!Message<>::decode_by<proto::JsonCodec>(repr_str), "");
   }
 }
 
 TEST(proto, binary_codec) {
-  proto::JsonCodec json;
-  proto::FastCodec bin;
-  json.encode(msg);
-  bin.encode(msg);
-  ASSERT(json.buffer().str().size() > bin.buffer().str().size(), "");
+  auto repr_str = message.encode();
+  auto json_str = message.encode_by<proto::JsonCodec>();
+  auto bin_str = message.encode_by<proto::BitsCodec>();
+
+  ASSERT(repr_str && json_str && bin_str, "");
+
+  std::cout << std::format("repr len={} Bytes, json len={} Bytes, bin len={} Bytes\n", repr_str->size(),
+                           json_str->size(), bin_str->size());
+
   {
-    Message<> msg2;
-    ASSERT(bin.decode(msg2), "");
-    ASSERT(msg2.data.size() == 2, "");
+    ASSERT(!Message<>::decode(*json_str), "");
+    ASSERT(!Message<>::decode(*bin_str), "");
   }
-  bin.buffer().clear();
-  bin.buffer() << json.buffer().str();
   {
-    Message<> msg2;
-    ASSERT(!bin.decode(msg2), "");
+    auto msg = Message<>::decode_by<proto::BitsCodec>(*bin_str);
+    ASSERT(msg && msg->data.size() == 2, "");
   }
 }

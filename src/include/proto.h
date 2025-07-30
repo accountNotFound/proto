@@ -6,34 +6,16 @@
 #include <sstream>
 #include <vector>
 
+#include "codec.h"
+
 namespace proto {
-
-struct BaseCodec {
-  struct Error {
-    std::string err_msg;
-  };
-
-  auto buffer() -> std::stringstream& { return _ss; }
-
-  auto buffer() const -> const std::stringstream& { return _ss; }
-
-  template <typename T>
-  auto encode(const T& data) -> std::expected<void, Error> {
-    return {};
-  }
-
-  template <typename T>
-  auto decode(T& data) -> std::expected<void, Error> {
-    return {};
-  }
-
- protected:
-  std::stringstream _ss;
-};
 
 template <typename Model>
 class BaseModel;
 
+/**
+ * @param Codec Default codec for this model class
+ */
 template <template <typename> typename Model, typename Codec>
   requires std::is_base_of_v<BaseCodec, Codec>
 class BaseModel<Model<Codec>> {
@@ -67,6 +49,40 @@ class BaseModel<Model<Codec>> {
   };
 
   static auto fields() -> const std::vector<std::unique_ptr<BaseField>>& { return BaseModel::_fields; }
+
+  /**
+   * @param data Input string is expected to be valid `Codec` format
+   */
+  static auto decode(const std::string& data) -> std::expected<Model<Codec>, typename Codec::Error> {
+    return decode_by<Codec>(data);
+  }
+
+  template <typename CustomCodec>
+  static auto decode_by(const std::string& data) -> std::expected<Model<Codec>, typename CustomCodec::Error> {
+    Model<Codec> model;
+    CustomCodec codec;
+    codec.buffer() << data;
+    if (auto r = codec.decode(model); r) {
+      return model;
+    } else {
+      return std::unexpected(r.error());
+    }
+  }
+
+  /**
+   * @return A valid `codec` format string, if success
+   */
+  auto encode() const -> std::expected<std::string, typename Codec::Error> { return encode_by<Codec>(); }
+
+  template <typename CustomCodec>
+  auto encode_by() const -> std::expected<std::string, typename CustomCodec::Error> {
+    CustomCodec codec;
+    if (auto r = codec.encode(*static_cast<const Model<Codec>*>(this)); r) {
+      return codec.buffer().str();
+    } else {
+      return std::unexpected(r.error());
+    }
+  }
 
  protected:
   template <typename T>
