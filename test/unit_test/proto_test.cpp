@@ -19,7 +19,7 @@ template <typename T = proto::BaseCodec>
 struct User : public proto::BaseModel<User<T>> {
   using Model = User;
 
-  FIELD(int, id, -1);
+  FIELD(uint32_t, id, 0);
   FIELD(std::string, name, "unkown");
   FIELD(UserDetail<>, detail, {});
 };
@@ -28,19 +28,19 @@ template <typename T = proto::BaseCodec>
 struct Message : public proto::BaseModel<Message<T>> {
   using Model = Message;
 
-  FIELD(int, code, 0);
+  FIELD(uint32_t, code, 0);
   FIELD(std::string, msg, "");
   FIELD(std::vector<User<>>, data, {});
 };
+
+User<> u1 = {.id = 123, .name = "Alice", .detail = {.height = 1.6, .weight = 50.5, .address = "Beijing"}};
+User<> u2 = {.id = 456, .name = "Bob", .detail = {.height = 1.8, .weight = 72.3, .address = "Shenzhen"}};
+Message<> msg = {.data = {u1, u2}};
 
 TEST(proto, plaintext_codec) {
   proto::ReprCodec repr;
   proto::JsonCodec json;
   {
-    User<> u1 = {.id = 123, .name = "Alice", .detail = {.height = 1.6, .weight = 50.5, .address = "Beijing"}};
-    User<> u2 = {.id = 456, .name = "Bob", .detail = {.height = 1.8, .weight = 72.3, .address = "Shenzhen"}};
-    Message<> msg = {.data = {u1, u2}};
-
     repr.encode(msg);
     std::cout << repr.buffer().str() << '\n';
 
@@ -61,7 +61,7 @@ TEST(proto, plaintext_codec) {
   }
 }
 
-TEST(proto, plaintext_decode) {
+TEST(proto, pretty_decode) {
   auto repr_str = R"(
 (0, "", [
   (123, "Alice", (
@@ -122,5 +122,24 @@ TEST(proto, plaintext_decode) {
     json.buffer().clear();
     json.buffer() << repr_str;
     ASSERT(!json.decode(msg), "");
+  }
+}
+
+TEST(proto, binary_codec) {
+  proto::JsonCodec json;
+  proto::FastCodec bin;
+  json.encode(msg);
+  bin.encode(msg);
+  ASSERT(json.buffer().str().size() > bin.buffer().str().size(), "");
+  {
+    Message<> msg2;
+    ASSERT(bin.decode(msg2), "");
+    ASSERT(msg2.data.size() == 2, "");
+  }
+  bin.buffer().clear();
+  bin.buffer() << json.buffer().str();
+  {
+    Message<> msg2;
+    ASSERT(!bin.decode(msg2), "");
   }
 }

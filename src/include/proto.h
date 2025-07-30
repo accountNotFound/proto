@@ -18,7 +18,9 @@ struct BaseCodec {
   auto buffer() const -> const std::stringstream& { return _ss; }
 
   template <typename T>
-  void encode(const T& data) {}
+  auto encode(const T& data) -> std::expected<void, Error> {
+    return {};
+  }
 
   template <typename T>
   auto decode(T& data) -> std::expected<void, Error> {
@@ -39,7 +41,7 @@ class BaseModel<Model<Codec>> {
   struct BaseField {
     virtual const char* name() const = 0;
 
-    virtual void dump(void* model, Codec& codec) const = 0;
+    virtual auto dump(const void* model, Codec& codec) const -> std::expected<void, typename Codec::Error> = 0;
 
     virtual auto load(void* model, Codec& codec) const -> std::expected<void, typename Codec::Error> = 0;
   };
@@ -51,7 +53,9 @@ class BaseModel<Model<Codec>> {
 
     const char* name() const { return _name; }
 
-    void dump(void* model, Codec& codec) const override { codec.encode(static_cast<Model<Codec>*>(model)->*_offset); }
+    auto dump(const void* model, Codec& codec) const -> std::expected<void, typename Codec::Error> override {
+      return codec.encode(static_cast<const Model<Codec>*>(model)->*_offset);
+    }
 
     auto load(void* model, Codec& codec) const -> std::expected<void, typename Codec::Error> override {
       return codec.decode(static_cast<Model<Codec>*>(model)->*_offset);
