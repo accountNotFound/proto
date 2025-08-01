@@ -7,6 +7,19 @@
 
 namespace proto {
 
+namespace _impl {
+
+template <typename T>
+struct MemberTrait {};
+
+template <typename T, typename Model>
+struct MemberTrait<T Model::*> {
+  using Field = T;
+  using Class = Model;
+};
+
+}  // namespace _impl
+
 template <typename Model>
 class BaseModel;
 
@@ -44,9 +57,18 @@ class BaseModel<Model<Codec>> {
     T Model<Codec>::* _offset;
   };
 
-  static auto fields() -> const std::vector<std::unique_ptr<BaseField>>& {
-    static constexpr Model<Codec> _;
+  constexpr static auto fields() -> const std::vector<std::unique_ptr<BaseField>>& {
+    static Model<Codec> _;
     return Model<Codec>::_fields;
+  }
+
+  /**
+   * @brief Regist the field with given default value
+   */
+  template <auto offset>
+  constexpr static auto make_field(const char* name, typename _impl::MemberTrait<decltype(offset)>::Field value) {
+    static auto _ = (_regist<decltype(value)>(name, offset), 0);
+    return value;
   }
 
   /**
@@ -95,9 +117,11 @@ class BaseModel<Model<Codec>> {
 
 }  // namespace proto
 
-#define PROTO_FIELD(type, name, ...) \
- public:                             \
-  type name = __VA_ARGS__;           \
-                                     \
- private:                            \
-  inline static auto _dumpy_##name = (Model::template _regist<type>(#name, &Model::name), 0);
+// #define PROTO_FIELD(type, name, ...) \
+//  public:                             \
+//   type name = __VA_ARGS__;           \
+//                                      \
+//  private:                            \
+//   inline static auto _dumpy_##name = (Model::template _regist<type>(#name, &Model::name), 0);
+
+#define PROTO_FIELD(type, name, ...) type name = Model::template make_field<&Model::name>(#name, __VA_ARGS__);

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <expected>
 #include <format>
 #include <functional>
@@ -106,7 +107,7 @@ class ArrayTextCodec : public TextCodec {
 
 class BytesCodec {
  public:
-  using VariableLength = u_int32_t;
+  using VariableLength = uint32_t;
 
   struct Error {
     std::string err_msg;
