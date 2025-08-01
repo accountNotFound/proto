@@ -3,34 +3,34 @@
 #include <iostream>
 #include <vector>
 
-#include "codec.h"
 #include "mtest.h"
+#include "proto.h"
 
 template <typename C = proto::ReprCodec>
 struct UserDetail : public proto::BaseModel<UserDetail<C>> {
   using Model = UserDetail;
 
-  FIELD(float, height, -1);
-  FIELD(double, weight, -1);
-  FIELD(std::string, address, "unknown");
+  PROTO_FIELD(float, height, -1);
+  PROTO_FIELD(double, weight, -1);
+  PROTO_FIELD(std::string, address, "unknown");
 };
 
 template <typename C = proto::ReprCodec>
 struct User : public proto::BaseModel<User<C>> {
   using Model = User;
 
-  FIELD(uint32_t, id, 0);
-  FIELD(std::string, name, "unkown");
-  FIELD(UserDetail<>, detail, {});
+  PROTO_FIELD(uint32_t, id, 0);
+  PROTO_FIELD(std::string, name, "unkown");
+  PROTO_FIELD(UserDetail<>, detail, {});
 };
 
 template <typename T = proto::ReprCodec>
 struct Message : public proto::BaseModel<Message<T>> {
   using Model = Message;
 
-  FIELD(uint32_t, code, 0);
-  FIELD(std::string, msg, "");
-  FIELD(std::vector<User<>>, data, {});
+  PROTO_FIELD(uint32_t, code, 0);
+  PROTO_FIELD(std::string, msg, "");
+  PROTO_FIELD(std::vector<User<>>, data, {});
 };
 
 User<> user1 = {.id = 123, .name = "Alice", .detail = {.height = 1.6, .weight = 50.5, .address = "Beijing"}};
@@ -114,7 +114,7 @@ TEST(proto, pretty_decode) {
 TEST(proto, binary_codec) {
   auto repr_str = message.encode();
   auto json_str = message.encode_by<proto::JsonCodec>();
-  auto bin_str = message.encode_by<proto::BitsCodec>();
+  auto bin_str = message.encode_by<proto::BinaryCodec>();
 
   ASSERT(repr_str && json_str && bin_str, "");
 
@@ -126,7 +126,7 @@ TEST(proto, binary_codec) {
     ASSERT(!Message<>::decode(*bin_str), "");
   }
   {
-    auto msg = Message<>::decode_by<proto::BitsCodec>(*bin_str);
+    auto msg = Message<>::decode_by<proto::BinaryCodec>(*bin_str);
     ASSERT(msg && msg->data.size() == 2, "");
   }
 }

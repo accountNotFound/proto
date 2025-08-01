@@ -1,9 +1,6 @@
 #pragma once
 
-#include <expected>
 #include <memory>
-#include <optional>
-#include <sstream>
 #include <vector>
 
 #include "codec.h"
@@ -16,8 +13,7 @@ class BaseModel;
 /**
  * @param Codec Default codec for this model class
  */
-template <template <typename> typename Model, typename Codec>
-  requires std::is_base_of_v<BaseCodec, Codec>
+template <template <typename> typename Model, Codeable Codec>
 class BaseModel<Model<Codec>> {
  public:
   struct BaseField {
@@ -48,7 +44,10 @@ class BaseModel<Model<Codec>> {
     T Model<Codec>::* _offset;
   };
 
-  static auto fields() -> const std::vector<std::unique_ptr<BaseField>>& { return BaseModel::_fields; }
+  static auto fields() -> const std::vector<std::unique_ptr<BaseField>>& {
+    static constexpr Model<Codec> _;
+    return Model<Codec>::_fields;
+  }
 
   /**
    * @param data Input string is expected to be valid `Codec` format
@@ -57,7 +56,7 @@ class BaseModel<Model<Codec>> {
     return decode_by<Codec>(data);
   }
 
-  template <typename CustomCodec>
+  template <Codeable CustomCodec>
   static auto decode_by(const std::string& data) -> std::expected<Model<Codec>, typename CustomCodec::Error> {
     Model<Codec> model;
     CustomCodec codec;
@@ -74,7 +73,7 @@ class BaseModel<Model<Codec>> {
    */
   auto encode() const -> std::expected<std::string, typename Codec::Error> { return encode_by<Codec>(); }
 
-  template <typename CustomCodec>
+  template <Codeable CustomCodec>
   auto encode_by() const -> std::expected<std::string, typename CustomCodec::Error> {
     CustomCodec codec;
     if (auto r = codec.encode(*static_cast<const Model<Codec>*>(this)); r) {
@@ -96,9 +95,9 @@ class BaseModel<Model<Codec>> {
 
 }  // namespace proto
 
-#define FIELD(type, name, ...) \
- public:                       \
-  type name = __VA_ARGS__;     \
-                               \
- private:                      \
+#define PROTO_FIELD(type, name, ...) \
+ public:                             \
+  type name = __VA_ARGS__;           \
+                                     \
+ private:                            \
   inline static auto _dumpy_##name = (Model::template _regist<type>(#name, &Model::name), 0);

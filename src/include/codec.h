@@ -1,277 +1,174 @@
 #pragma once
 
+#include <expected>
 #include <format>
+#include <functional>
+#include <sstream>
 
 namespace proto {
 
 template <typename Derived>
 class BaseModel;
 
-/**
- * @brief A no-operation codec
- */
-struct BaseCodec {
+template <typename Codec>
+concept Codeable = requires(Codec c, std::string s) {
+  { c.template encode(s) } -> std::convertible_to<std::expected<void, typename Codec::Error>>;
+  { c.template decode(s) } -> std::convertible_to<std::expected<void, typename Codec::Error>>;
+  { c.buffer() } -> std::convertible_to<std::stringstream&>;
+};
+
+namespace _impl {
+
+class TextCodec {
+ public:
   struct Error {
     std::string err_msg;
   };
 
   auto buffer() -> std::stringstream& { return _ss; }
 
-  auto buffer() const -> const std::stringstream& { return _ss; }
+  auto encode(const std::string& str) -> std::expected<void, Error>;
+
+  auto decode(std::string& str) -> std::expected<void, Error>;
 
   template <typename T>
-  auto encode(const T& data) -> std::expected<void, Error> {
+    requires std::is_arithmetic_v<T>
+  auto encode(T num) -> std::expected<void, Error> {
+    return (_put(num), std::expected<void, Error>{});
+  }
+
+  template <typename T>
+    requires std::is_arithmetic_v<T>
+  auto decode(T& num) -> std::expected<void, Error> {
+    return _get(num) ? std::expected<void, Error>{}
+                     : std::unexpected(Error(std::format("invalid bytes for {}", typeid(T).name())));
+  }
+
+ protected:
+  std::stringstream _ss;
+
+  template <typename T>
+  void _put(const T& v) {
+    _ss << v;
+  }
+
+  template <typename T>
+  bool _get(T& v) {
+    return (_ss >> v, _ss.good());
+  }
+
+  // skip blanks and see next valid character
+  bool _see(char c);
+
+  auto _catch(std::function<void()>&& stats) -> std::expected<void, Error>;
+
+  void _try(std::expected<void, Error>&& ex, std::string&& msg);
+
+  // skip blanks and try to eat next valid character
+  void _try_eat(char c, std::string&& msg);
+
+  void _drop_blanks();
+};
+
+template <typename Codec>
+class ArrayTextCodec : public TextCodec {
+ public:
+  using TextCodec::decode;
+  using TextCodec::encode;
+
+  template <typename T>
+  auto encode(const std::vector<T>& arr) -> std::expected<void, Error> {
+    return _catch([this, &arr]() {
+      _put('[');
+      for (size_t i = 0; i < arr.size(); ++i) {
+        i > 0 ? _put(',') : void();
+        _try(static_cast<Codec*>(this)->encode(arr[i]), std::format("array[{}] encode", i));
+      }
+      _put(']');
+    });
+  }
+
+  template <typename T>
+  auto decode(std::vector<T>& arr) -> std::expected<void, Error> {
+    return _catch([this, &arr]() mutable {
+      _try_eat('[', "array start");
+      arr.clear();
+      for (size_t i = 0; !_see(']'); ++i) {
+        !arr.empty() ? _try_eat(',', "array seperate") : void();
+        T val;
+        _try(static_cast<Codec*>(this)->decode(val), std::format("array[{}] decode", i));
+        arr.emplace_back(std::move(val));
+      }
+      _try_eat(']', "array end");
+    });
+  }
+};
+
+class BytesCodec {
+ public:
+  using VariableLength = u_int32_t;
+
+  struct Error {
+    std::string err_msg;
+  };
+
+  auto buffer() -> std::stringstream& { return _ss; }
+
+  auto encode(const std::string& value) -> std::expected<void, Error>;
+
+  auto decode(std::string& value) -> std::expected<void, Error>;
+
+  template <typename T>
+    requires std::is_arithmetic_v<T>
+  auto encode(T num) -> std::expected<void, Error> {
+    std::endian::native == std::endian::little ? _reverse_byte_order(reinterpret_cast<char*>(&num), sizeof(T)) : void();
+    _ss.write(reinterpret_cast<char*>(&num), sizeof(T));
     return {};
   }
 
   template <typename T>
-  auto decode(T& data) -> std::expected<void, Error> {
+    requires std::is_arithmetic_v<T>
+  auto decode(T& num) -> std::expected<void, Error> {
+    _ss.read(reinterpret_cast<char*>(&num), sizeof(T));
+    if (_ss.gcount() != sizeof(T)) {
+      return std::unexpected(Error(std::format("invalid bytes for {}", typeid(T).name())));
+    }
+    std::endian::native == std::endian::little ? _reverse_byte_order(reinterpret_cast<char*>(&num), sizeof(T)) : void();
     return {};
   }
 
  protected:
   std::stringstream _ss;
-};
 
-namespace _impl {
+  auto _catch(std::function<void()>&& stats) -> std::expected<void, Error>;
 
-template <typename DerivedCodec>
-struct PlaintextCodec : public BaseCodec {
   template <typename T>
-    requires std::is_arithmetic_v<T>
-  auto encode(T value) -> std::expected<void, Error> {
-    _ss << value;
-    return {};
-  }
-
-  auto encode(const std::string& value) -> std::expected<void, Error> {
-    _ss << '"' << value << '"';
-    return {};
-  }
-
-  template <typename V>
-  auto encode(const std::vector<V>& arr) -> std::expected<void, Error> {
-    _ss << '[';
-    for (size_t i = 0; auto& v : arr) {
-      if (i > 0) {
-        _ss << ',';
-      }
-      if (auto r = static_cast<DerivedCodec*>(this)->encode(v); !r) {
-        return r;
-      }
-      ++i;
+  T _try(std::expected<T, Error>&& ex, std::string&& msg) {
+    if (!ex) {
+      throw Error(std::move(msg));
     }
-    _ss << ']';
-    return {};
+    if constexpr (!std::is_same_v<T, void>) {
+      return std::move(ex.value());
+    }
   }
 
   template <typename T>
-    requires std::is_arithmetic_v<T>
-  auto decode(T& value) -> std::expected<void, Error> {
-    _remove_blanks();
-    if (_ss >> value) {
-      return {};
+  auto _encode_varible_len(T len) -> std::expected<VariableLength, Error> {
+    VariableLength u32 = len;
+    if (u32 < len) {
+      return std::unexpected(Error("variable length object (string and array) only support a maximum 4G elements"));
     }
-    return std::unexpected(Error(std::format("invalid parse for {}", typeid(T).name())));
+    _ss.write(&_variable_length_tag, 1);
+    encode(u32);  // always success
+    return u32;
   }
 
-  auto decode(std::string& value) -> std::expected<void, Error> {
-    _remove_blanks();
-    if (_ss.get() != '"') {
-      return std::unexpected(Error(std::format("expect '\"' to start string")));
-    }
-    std::stringstream buffer;
-    while (true) {
-      char c = _ss.get();
-      if (c == '"') {
-        value = buffer.str();
-        return {};
-      }
-      if (c == _ss.eof()) {
-        return std::unexpected(Error(std::format("expect '\"' to end string")));
-      }
-      buffer.put(c);
-    }
-  }
-
-  template <typename V>
-  auto decode(std::vector<V>& array) -> std::expected<void, Error> {
-    _remove_blanks();
-    if (_ss.get() != '[') {
-      return std::unexpected(Error(std::format("expect '[' to start vector<{}>", typeid(V).name())));
-    }
-    std::vector<V> arr;
-    for (size_t i = 0; true; ++i) {
-      _remove_blanks();
-      char c = _ss.peek();
-      if (c == ']') {
-        break;
-      }
-      if (c == _ss.eof()) {
-        return std::unexpected(Error(std::format("expect ']' to end vector<{}>", typeid(V).name())));
-      }
-      if (i > 0 && _ss.get() != ',') {
-        return std::unexpected(Error(std::format("expect ',' to seperate vector<{}>", typeid(V).name())));
-      }
-      V val;
-      if (auto r = static_cast<DerivedCodec*>(this)->decode(val); !r) {
-        return r;
-      }
-      arr.emplace_back(std::move(val));
-    }
-    if (_ss.get() != ']') {
-      return std::unexpected(Error(std::format("expect ']' to end vector<{}>", typeid(V).name())));
-    }
-    array = std::move(arr);
-    return {};
-  }
-
- protected:
-  void _remove_blanks() {
-    while (true) {
-      char c = _ss.peek();
-      if (c == ' ' || c == '\n' || c == '\t') {
-        _ss.get();
-      } else {
-        return;
-      }
-    }
-  }
-};
-
-/**
- * @note
- *
- * 1. Use fixed size number (.e.g `std::int16_t`, `std::uint32_t`) instead of `int` or other things to garuantee the
- * correctness.
- *
- * 2. Max supported length of string is `4GB`, or it will be truncated
- *
- */
-template <typename DerivedCodec>
-struct BinaryCodec : public BaseCodec {
-  struct TypeTag {
-    inline static const char Number = 0xf1;
-    inline static const char String = 0xf2;
-    inline static const char Array = 0xf3;
-    inline static const char Model = 0xf4;
-  };
-
-  BinaryCodec() {
-    uint16_t test = 0x0001;
-    _is_little_endian = (*reinterpret_cast<char*>(&test) == 0x01);
-  }
-
-  template <typename T>
-    requires std::is_arithmetic_v<T>
-  auto encode(T value) -> std::expected<void, Error> {
-    _ss.write(&TypeTag::Number, 1);
-    if (_is_little_endian) {
-      // to big endian order
-      char* start = reinterpret_cast<char*>(&value);
-      char* end = start + sizeof(T) - 1;
-      while (start < end) {
-        std::swap(*start, *end);
-        ++start;
-        --end;
-      }
-    }
-    _ss.write(reinterpret_cast<char*>(&value), sizeof(T));
-    return {};
-  }
-
-  auto encode(const std::string& value) -> std::expected<void, Error> {
-    _ss.write(&TypeTag::String, 1);
-    uint32_t len = value.size();
-    if (len != value.size()) {
-      return std::unexpected(Error("string length should be <= 4G bytes"));
-    }
-    encode(len);
-    _ss.write(value.data(), len);
-    return {};
-  }
-
-  template <typename V>
-  auto encode(const std::vector<V>& arr) -> std::expected<void, Error> {
-    _ss.write(&TypeTag::Array, 1);
-    uint32_t len = arr.size();
-    if (len != arr.size()) {
-      return std::unexpected(Error(std::format("vector<{}> length should be <= 4G", typeid(V).name())));
-    }
-    encode(len);
-    for (auto& v : arr) {
-      if (auto r = static_cast<DerivedCodec*>(this)->encode(v); !r) {
-        return r;
-      }
-    }
-    return {};
-  }
-
-  template <typename T>
-    requires std::is_arithmetic_v<T>
-  auto decode(T& value) -> std::expected<void, Error> {
-    char tag = 0;
-    _ss.read(&tag, 1);
-    if (_ss.gcount() == 0 || tag != TypeTag::Number) {
-      return std::unexpected(Error(std::format("invalid tag while parse {}", typeid(T).name())));
-    }
-    _ss.read(reinterpret_cast<char*>(&value), sizeof(T));
-    if (_ss.gcount() != sizeof(T)) {
-      return std::unexpected(Error(std::format("insufficent bytes for {}", typeid(T).name())));
-    }
-    if (_is_little_endian) {
-      char* start = reinterpret_cast<char*>(&value);
-      char* end = start + sizeof(T) - 1;
-      while (start < end) {
-        std::swap(*start, *end);
-        ++start;
-        --end;
-      }
-    }
-    return {};
-  }
-
-  auto decode(std::string& value) -> std::expected<void, Error> {
-    char tag = 0;
-    _ss.read(&tag, 1);
-    if (_ss.gcount() == 0 || tag != TypeTag::String) {
-      return std::unexpected(Error("invalid tag while parse string"));
-    }
-    uint32_t len;
-    if (auto r = decode(len); !r) {
-      return r;
-    }
-    value.resize(len);
-    _ss.read(value.data(), len);
-    if (_ss.gcount() != len) {
-      return std::unexpected(Error(std::format("insufficent bytes for string")));
-    }
-    return {};
-  }
-
-  template <typename V>
-  auto decode(std::vector<V>& arr) -> std::expected<void, Error> {
-    char tag = 0;
-    _ss.read(&tag, 1);
-    if (_ss.gcount() == 0 || tag != TypeTag::Array) {
-      return std::unexpected(Error(std::format("invalid tag while parse vector<{}>", typeid(V).name())));
-    }
-    uint32_t len;
-    if (auto r = decode(len); !r) {
-      return r;
-    }
-    for (uint32_t i = 0; i < len; ++i) {
-      V v;
-      if (auto r = static_cast<DerivedCodec*>(this)->decode(v); !r) {
-        return r;
-      }
-      arr.emplace_back(std::move(v));
-    }
-    return {};
-  }
+  auto _decode_variable_len() -> std::expected<VariableLength, Error>;
 
  private:
-  bool _is_little_endian;
+  inline static constexpr char _variable_length_tag = 0xf1;
+
+  void _reverse_byte_order(char* start, size_t size);
 };
 
 }  // namespace _impl
@@ -281,119 +178,81 @@ struct BinaryCodec : public BaseCodec {
  *
  * @note Decode destination object may come into invalid status if decode failed
  */
-class ReprCodec : public _impl::PlaintextCodec<ReprCodec> {
+class ReprCodec : public _impl::ArrayTextCodec<ReprCodec> {
  public:
-  using PlaintextCodec::decode;
-  using PlaintextCodec::encode;
+  using ArrayTextCodec<ReprCodec>::decode;
+  using ArrayTextCodec<ReprCodec>::encode;
 
   template <template <typename> typename Model, typename Codec>
     requires std::is_base_of_v<BaseModel<Model<Codec>>, Model<Codec>>
   auto encode(const Model<Codec>& model) -> std::expected<void, Error> {
-    static Model<ReprCodec> _;
-    _ss << '(';
-    for (size_t i = 0; auto& field : Model<ReprCodec>::fields()) {
-      if (i > 0) {
-        _ss << ',';
+    return _catch([this, &model]() {
+      auto& fields = Model<ReprCodec>::fields();
+      _put('(');
+      for (size_t i = 0; i < fields.size(); ++i) {
+        i > 0 ? _put(',') : void();
+        _try(fields[i]->dump(&model, *this),
+             std::format("{}::{} encode", typeid(Model<Codec>).name(), fields[i]->name()));
       }
-      if (auto r = field->dump(&model, *this); !r) {
-        return r;
-      }
-      ++i;
-    }
-    _ss << ')';
-    return {};
+      _put(')');
+    });
   }
 
   template <template <typename> typename Model, typename Codec>
     requires std::is_base_of_v<BaseModel<Model<Codec>>, Model<Codec>>
   auto decode(Model<Codec>& model) -> std::expected<void, Error> {
-    static Model<ReprCodec> _;
-    _remove_blanks();
-    if (_ss.get() != '(') {
-      return std::unexpected(Error(std::format("expect '(' to start {}", typeid(Model<Codec>).name())));
-    }
-    for (size_t i = 0; auto& field : Model<ReprCodec>::fields()) {
-      _remove_blanks();
-      char c = _ss.peek();
-      if (c == _ss.eof()) {
-        return std::unexpected(Error(std::format("expect ')' to end {}", typeid(Model<Codec>).name())));
+    return _catch([this, &model]() mutable {
+      auto& fields = Model<ReprCodec>::fields();
+      _try_eat('(', "model start");
+      for (size_t i = 0; i < fields.size(); ++i) {
+        i > 0 ? _try_eat(',', "model seperate") : void();
+        _try(fields[i]->load(&model, *this),
+             std::format("{}::{} decode", typeid(Model<Codec>).name(), fields[i]->name()));
       }
-      if (i > 0 && _ss.get() != ',') {
-        return std::unexpected(Error(std::format("expect ',' to separate {}", typeid(Model<Codec>).name())));
-      }
-      if (auto r = field->load(&model, *this); !r) {
-        return r;
-      }
-      ++i;
-    }
-    _remove_blanks();
-    if (_ss.get() != ')') {
-      return std::unexpected(Error(std::format("expect ')' to end {}", typeid(Model<Codec>).name())));
-    }
-    return {};
+      _try_eat(')', "model end");
+    });
   }
 };
 
-/**
- * @note Decode destination object may come into invalid status if decode failed
- */
-class JsonCodec : public _impl::PlaintextCodec<JsonCodec> {
+class JsonCodec : public _impl::ArrayTextCodec<JsonCodec> {
  public:
-  using PlaintextCodec::decode;
-  using PlaintextCodec::encode;
+  using ArrayTextCodec<JsonCodec>::decode;
+  using ArrayTextCodec<JsonCodec>::encode;
 
   template <template <typename> typename Model, typename Codec>
     requires std::is_base_of_v<BaseModel<Model<Codec>>, Model<Codec>>
   auto encode(const Model<Codec>& model) -> std::expected<void, Error> {
-    static Model<JsonCodec> _;
-    _ss << '{';
-    for (size_t i = 0; auto& field : Model<JsonCodec>::fields()) {
-      if (i > 0) {
-        _ss << ',';
+    return _catch([this, &model]() {
+      auto& fields = Model<JsonCodec>::fields();
+      _put('{');
+      for (size_t i = 0; i < fields.size(); ++i) {
+        i > 0 ? _put(',') : void();
+        _try(encode(fields[i]->name()),
+             std::format("{}::{} encode key", typeid(Model<Codec>).name(), fields[i]->name()));
+        _put(':');
+        _try(fields[i]->dump(&model, *this),
+             std::format("{}::{} encode value", typeid(Model<Codec>).name(), fields[i]->name()));
       }
-      _ss << '"' << field->name() << '"' << ':';
-      if (auto r = field->dump(&model, *this); !r) {
-        return r;
-      }
-      ++i;
-    }
-    _ss << '}';
-    return {};
+      _put('}');
+    });
   }
 
   template <template <typename> typename Model, typename Codec>
     requires std::is_base_of_v<BaseModel<Model<Codec>>, Model<Codec>>
   auto decode(Model<Codec>& model) -> std::expected<void, Error> {
-    static Model<JsonCodec> _;
-    _remove_blanks();
-    if (_ss.get() != '{') {
-      return std::unexpected(Error(std::format("expect '{{' to start {}", typeid(Model<Codec>).name())));
-    }
-    for (size_t i = 0; auto& field : Model<JsonCodec>::fields()) {
-      _remove_blanks();
-      char c = _ss.peek();
-      if (c == _ss.eof()) {
-        return std::unexpected(Error(std::format("expect '}}' to end {}", typeid(Model<Codec>).name())));
+    return _catch([this, &model]() mutable {
+      auto& fields = Model<JsonCodec>::fields();
+      _try_eat('{', "model start");
+      for (size_t i = 0; i < fields.size(); ++i) {
+        i > 0 ? _try_eat(',', "model separate") : void();
+        std::string name;
+        _try(decode(name), std::format("{}::{} decode key", typeid(Model<Codec>).name(), fields[i]->name()));
+        _try_eat(':', "model colon");
+        _try(fields[i]->load(&model, *this),
+             std::format("{}::{} decode value", typeid(Model<Codec>).name(), fields[i]->name()));
       }
-      if (i > 0 && _ss.get() != ',') {
-        return std::unexpected(Error(std::format("expect ',' to separate {}", typeid(Model<Codec>).name())));
-      }
-      std::string name;
-      decode(name);
-      _remove_blanks();
-      if (_ss.get() != ':') {
-        return std::unexpected(Error(std::format("expect ':' to separate {}", typeid(Model<Codec>).name())));
-      }
-      if (auto r = field->load(&model, *this); !r) {
-        return r;
-      }
-      ++i;
-    }
-    _remove_blanks();
-    if (_ss.get() != '}') {
-      return std::unexpected(Error(std::format("expect '}}' to end {}", typeid(Model<Codec>).name())));
-    }
-    return {};
+      _try_eat('}', "model end");
+    });
   }
 };
 
@@ -402,40 +261,52 @@ class JsonCodec : public _impl::PlaintextCodec<JsonCodec> {
  *
  * @note Decode destination object may come into invalid status if decode failed
  */
-class BitsCodec : public _impl::BinaryCodec<BitsCodec> {
+class BinaryCodec : public _impl::BytesCodec {
  public:
-  using BinaryCodec::decode;
-  using BinaryCodec::encode;
+  using BytesCodec::decode;
+  using BytesCodec::encode;
+
+  template <typename T>
+  auto encode(const std::vector<T>& arr) -> std::expected<void, Error> {
+    return _catch([this, &arr]() {
+      VariableLength len = _try(_encode_varible_len(arr.size()), "array encode");
+      for (VariableLength i = 0; i < len; ++i) {
+        _try(encode(arr[i]), std::format("array[{}] encode", i));
+      }
+    });
+  }
+
+  template <typename T>
+  auto decode(std::vector<T>& arr) -> std::expected<void, Error> {
+    return _catch([this, &arr]() mutable {
+      VariableLength len = _try(_decode_variable_len(), "array decode");
+      arr.clear();
+      for (VariableLength i = 0; i < len; ++i) {
+        T val;
+        _try(decode(val), std::format("array[{}] decode", i));
+        arr.emplace_back(std::move(val));
+      }
+    });
+  }
 
   template <template <typename> typename Model, typename Codec>
     requires std::is_base_of_v<BaseModel<Model<Codec>>, Model<Codec>>
   auto encode(const Model<Codec>& model) -> std::expected<void, Error> {
-    static Model<BitsCodec> _;
-    _ss.write(&TypeTag::Model, 1);
-    for (size_t i = 0; auto& field : Model<BitsCodec>::fields()) {
-      if (auto r = field->dump(&model, *this); !r) {
-        return r;
+    return _catch([this, &model]() {
+      for (auto& field : Model<BinaryCodec>::fields()) {
+        _try(field->dump(&model, *this), std::format("{}::{} encode", typeid(Model<Codec>).name(), field->name()));
       }
-      ++i;
-    }
-    return {};
+    });
   }
 
   template <template <typename> typename Model, typename Codec>
     requires std::is_base_of_v<BaseModel<Model<Codec>>, Model<Codec>>
   auto decode(Model<Codec>& model) -> std::expected<void, Error> {
-    static Model<BitsCodec> _;
-    char tag = 0;
-    _ss.read(&tag, 1);
-    if (_ss.gcount() == 0 || tag != TypeTag::Model) {
-      return std::unexpected(Error(std::format("invalid tag while parse {}", typeid(Model<Codec>).name())));
-    }
-    for (auto& field : Model<BitsCodec>::fields()) {
-      if (auto r = field->load(&model, *this); !r) {
-        return r;
+    return _catch([this, &model]() mutable {
+      for (auto& field : Model<BinaryCodec>::fields()) {
+        _try(field->load(&model, *this), std::format("{}::{} decode", typeid(Model<Codec>).name(), field->name()));
       }
-    }
-    return {};
+    });
   }
 };
 
