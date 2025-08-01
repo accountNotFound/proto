@@ -66,7 +66,7 @@ class BaseModel<Model<Codec>> {
    * @brief Regist the field with given default value
    */
   template <auto offset>
-  constexpr static auto make_field(const char* name, typename _impl::MemberTrait<decltype(offset)>::Field value) {
+  constexpr static auto codable_field(const char* name, typename _impl::MemberTrait<decltype(offset)>::Field value) {
     static auto _ = (_regist<decltype(value)>(name, offset), 0);
     return value;
   }
@@ -124,4 +124,4 @@ class BaseModel<Model<Codec>> {
 //  private:                            \
 //   inline static auto _dumpy_##name = (Model::template _regist<type>(#name, &Model::name), 0);
 
-#define PROTO_FIELD(type, name, ...) type name = Model::template make_field<&Model::name>(#name, __VA_ARGS__);
+#define PROTO_FIELD(type, name, ...) type name = Model::template codable_field<&Model::name>(#name, __VA_ARGS__);

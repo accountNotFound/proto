@@ -1,4 +1,4 @@
-### brief
+# brief
 
 A simple struct serialize & deserialize library based on C++23
 
@@ -10,13 +10,17 @@ template <typename C = proto::ReprCodec> // specify default codec class
 struct User : public proto::BaseModel<User<C>> {
   using Model = User;
 
-  uint32_t id = Model::template make_field<&Model::id>("id", 0);
+  // declare a field which can be serialized and deserialized
+  uint32_t id = Model::template codable_field<&Model::id>("id", 0);
 
   // or use this macro, which simplily expand to the `id` definition above
   // PROTO_FIELD(uint32_t, id, 0);
 
   PROTO_FIELD(std::string, name, "unkown");
   PROTO_FIELD(UserDetail<>, detail, {});
+
+  // a simple field can not be serialized or deserialized
+  double weight = 70.5;
 };
 
 template <typename C = proto::ReprCodec>
