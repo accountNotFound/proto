@@ -21,21 +21,35 @@ struct User : public proto::BaseModel<User<C>> {
 
   PROTO_FIELD(uint32_t, id, 0);
   PROTO_FIELD(std::string, name, "unkown");
-  PROTO_FIELD(UserDetail<>, detail, {});
+  // PROTO_FIELD(UserDetail<>, detail, {});
 };
 
-template <typename T = proto::ReprCodec>
-struct Message : public proto::BaseModel<Message<T>> {
+template <typename C = proto::ReprCodec>
+struct UserResponse : public proto::BaseModel<UserResponse<C>> {
+  using Model = UserResponse;
+
+  PROTO_FIELD(User<>, user, {});
+  PROTO_FIELD(std::vector<User<>>, followers, {});
+};
+
+template <typename C = proto::ReprCodec>
+struct Message : public proto::BaseModel<Message<C>> {
   using Model = Message;
 
   PROTO_FIELD(uint32_t, code, 0);
   PROTO_FIELD(std::string, msg, "");
-  PROTO_FIELD(std::vector<User<>>, data, {});
+  PROTO_FIELD(UserResponse<>, data, {});
 };
 
-User<> user1 = {.id = 123, .name = "Alice", .detail = {.height = 1.6, .weight = 50.5, .address = "Beijing"}};
-User<> user2 = {.id = 456, .name = "Bob", .detail = {.height = 1.8, .weight = 72.3, .address = "Shenzhen"}};
-Message<> message = {.data = {user1, user2}};
+// User<> user1 = {.id = 123, .name = "Alice", .detail = {.height = 1.6, .weight = 50.5, .address = "Beijing"}};
+// User<> user2 = {.id = 456, .name = "Bob", .detail = {.height = 1.8, .weight = 72.3, .address = "Shenzhen"}};
+// Message<> message = {.data = {user1, user2}};
+
+User<> user1 = {.id = 123, .name = "Alice"};
+User<> user2 = {.id = 456, .name = "Bob"};
+User<> user3 = {.id = 789, .name = "Cathy"};
+
+Message<> message = {.data = {.user = user1, .followers = {user2, user3}}};
 
 TEST(proto, plaintext_codec) {
   std::string json_str;
@@ -49,10 +63,10 @@ TEST(proto, plaintext_codec) {
   }
   {
     auto msg = Message<>::decode(repr_str);
-    ASSERT(msg && msg->data.size() == 2, "");
+    ASSERT(msg && msg->data.followers.size() == 2, "");
 
     auto msg2 = Message<>::decode_by<proto::JsonCodec>(json_str);
-    ASSERT(msg2 && msg2->data.size() == 2, "");
+    ASSERT(msg2 && msg2->data.followers.size() == 2, "");
   }
   {
     ASSERT(!Message<>::decode(json_str), "");
@@ -62,49 +76,40 @@ TEST(proto, plaintext_codec) {
 
 TEST(proto, pretty_decode) {
   auto repr_str = R"(
-(0, "", [
-  (123, "Alice", (
-    1.6, 50.5, "Beijing"
-  )), 
-  (456, "Bob", (
-    1.8, 72.3, "Shenzhen"
-  ))
-])
+(0,"",(
+  (123,"Alice"),[
+    (456,"Bob"),(789,"Cathy")]))
 )";
 
   auto json_str = R"(
 {
   "code": 0,
   "msg": "",
-  "data": [
-    {
+  "data": {
+    "user": {
       "id": 123,
-      "name": "Alice",
-      "detail": {
-        "height": 1.6,
-        "weight": 50.5,
-        "address": "Beijing"
-      }
+      "name": "Alice"
     },
-    {
-      "id": 456,
-      "name": "Bob",
-      "detail": {
-        "height": 1.8,
-        "weight": 72.3,
-        "address": "Shenzhen"
+    "followers": [
+      {
+        "id": 456,
+        "name": "Bob"
+      },
+      {
+        "id": 789,
+        "name": "Cathy"
       }
-    }
-  ]
+    ]
+  }
 }
 )";
 
   {
     auto msg1 = Message<>::decode(repr_str);
-    ASSERT(msg1 && msg1->data.size() == 2, "");
+    ASSERT(msg1 && msg1->data.followers.size() == 2, "");
 
     auto msg2 = Message<>::decode_by<proto::JsonCodec>(json_str);
-    ASSERT(msg2 && msg2->data.size() == 2, "");
+    ASSERT(msg2 && msg2->data.followers.size() == 2, "");
 
     ASSERT(!Message<>::decode(json_str), "");
     ASSERT(!Message<>::decode_by<proto::JsonCodec>(repr_str), "");
@@ -127,6 +132,6 @@ TEST(proto, binary_codec) {
   }
   {
     auto msg = Message<>::decode_by<proto::BinaryCodec>(*bin_str);
-    ASSERT(msg && msg->data.size() == 2, "");
+    ASSERT(msg && msg->data.followers.size() == 2, "");
   }
 }
