@@ -1,5 +1,7 @@
 #include "codec.h"
 
+#include <cstring>
+
 namespace proto::_impl {
 
 auto TextCodec::encode(const std::string& str) -> std::expected<void, Error> {
@@ -22,6 +24,42 @@ auto TextCodec::decode(std::string& str) -> std::expected<void, Error> {
     return std::unexpected(std::move(e));
   }
   return {};
+}
+
+auto TextCodec::encode(bool b) -> std::expected<void, Error> {
+  _ss << (b ? "true" : "false");
+  return {};
+}
+
+auto TextCodec::decode(bool& b) -> std::expected<void, Error> {
+  _drop_blanks();
+  if (_see('0')) {
+    _try_eat('0', "");
+    b = false;
+    return {};
+  }
+  if (_see('1')) {
+    _try_eat('1', "");
+    b = true;
+    return {};
+  }
+  if (_see('t') || _see('T')) {
+    char buffer[4] = {0};
+    _ss.read(buffer, 4);
+    if (std::strcmp(buffer, "true") || std::strcmp(buffer, "True") || std::strcmp(buffer, "TRUE")) {
+      b = true;
+      return {};
+    }
+  }
+  if (_see('f') || _see('F')) {
+    char buffer[5] = {0};
+    _ss.read(buffer, 5);
+    if (std::strcmp(buffer, "false") || std::strcmp(buffer, "False") || std::strcmp(buffer, "FALSE")) {
+      b = false;
+      return {};
+    }
+  }
+  return std::unexpected(Error("invalid bytes for bool"));
 }
 
 bool TextCodec::_see(char c) {

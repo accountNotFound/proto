@@ -30,19 +30,22 @@ template <template <typename> typename Model, Codeable Codec>
 class BaseModel<Model<Codec>> {
  public:
   struct BaseField {
-    virtual const char* name() const = 0;
+    BaseField(const char* name) : _name(name) {}
+
+    const char* name() const { return _name; }
 
     virtual auto dump(const void* model, Codec& codec) const -> std::expected<void, typename Codec::Error> = 0;
 
     virtual auto load(void* model, Codec& codec) const -> std::expected<void, typename Codec::Error> = 0;
+
+   private:
+    const char* _name;
   };
 
   template <typename T>
   class TypeField : public BaseField {
    public:
-    TypeField(const char* name, T Model<Codec>::* offset) : _name(name), _offset(offset) {};
-
-    const char* name() const { return _name; }
+    TypeField(const char* name, T Model<Codec>::* offset) : BaseField(name), _offset(offset) {};
 
     auto dump(const void* model, Codec& codec) const -> std::expected<void, typename Codec::Error> override {
       return codec.encode(static_cast<const Model<Codec>*>(model)->*_offset);
@@ -53,7 +56,6 @@ class BaseModel<Model<Codec>> {
     }
 
    private:
-    const char* _name;
     T Model<Codec>::* _offset;
   };
 

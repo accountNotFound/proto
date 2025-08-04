@@ -32,6 +32,12 @@ class TextCodec {
 
   auto decode(std::string& str) -> std::expected<void, Error>;
 
+  auto encode(const char* str) -> std::expected<void, Error> { return encode(std::string(str)); }
+
+  auto encode(bool b) -> std::expected<void, Error>;
+
+  auto decode(bool& b) -> std::expected<void, Error>;
+
   template <typename T>
     requires std::is_arithmetic_v<T>
   auto encode(T num) -> std::expected<void, Error> {
