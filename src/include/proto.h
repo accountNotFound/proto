@@ -1,5 +1,6 @@
 #pragma once
 
+#include <map>
 #include <memory>
 #include <vector>
 
@@ -34,6 +35,8 @@ class BaseModel<Model<Codec>> {
 
     const char* name() const { return _name; }
 
+    virtual size_t offset() const = 0;
+
     virtual auto dump(const void* model, Codec& codec) const -> std::expected<void, typename Codec::Error> = 0;
 
     virtual auto load(void* model, Codec& codec) const -> std::expected<void, typename Codec::Error> = 0;
@@ -55,13 +58,23 @@ class BaseModel<Model<Codec>> {
       return codec.decode(static_cast<Model<Codec>*>(model)->*_offset);
     }
 
+    size_t offset() const override { return *reinterpret_cast<const size_t*>(&_offset); }
+
    private:
     T Model<Codec>::* _offset;
   };
 
-  constexpr static auto fields() -> const std::vector<std::unique_ptr<BaseField>>& {
+  constexpr static auto fields() -> const std::vector<const BaseField*>& {
     static Model<Codec> _;
-    return Model<Codec>::_fields;
+    static auto fields = []() {
+      std::vector<const BaseField*> res;
+      for (auto& field : Model<Codec>::_fields) {
+        res.push_back(field.get());
+      }
+      std::sort(res.begin(), res.end(), [](const BaseField* a, const BaseField* b) { return a->offset() < b->offset(); });
+      return res;
+    }();
+    return fields;
   }
 
   /**

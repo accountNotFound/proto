@@ -75,7 +75,7 @@ TEST(proto, plaintext_codec) {
   }
 }
 
-DISABLE_TEST(proto, pretty_decode) {
+TEST(proto, pretty_decode) {
   auto repr_str = R"(
 (0, "", (
   (123, "Alice", True), [
